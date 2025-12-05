@@ -14,11 +14,12 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
           scope: '@igorppbr'
-      - run: corepack enable
-      - run: yarn install
-      - run: yarn run build
+      - run: npm ci
+      - run: npm run build
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NODE_AUTH_TOKEN }}
           access: public
+          registry: 'https://registry.npmjs.org'
