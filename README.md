@@ -197,7 +197,7 @@ const analyticsModuleService = container.resolve(Modules.ANALYTICS)
 
 await analyticsModuleService.track({
   event: "product_viewed",
-  userId: "customer123",
+  actor_id: "customer123",
   properties: {
     product_id: "prod_abc",
     product_name: "Amazing Widget",
@@ -213,18 +213,26 @@ Create a workflow to track order events:
 
 ```typescript
 // src/workflows/track-order-placed.ts
-import { createWorkflow, createStep } from "@medusajs/framework/workflows-sdk"
+import { createWorkflow, createStep, WorkflowResponse } from "@medusajs/framework/workflows-sdk"
 import { Modules } from "@medusajs/framework/utils"
 import { useQueryGraphStep } from "@medusajs/medusa/core-flows"
 
+type WorkflowInput = {
+  order_id: string
+}
+
+type StepInput = {
+  order: any
+}
+
 const trackOrderPlacedStep = createStep(
   "track-order-placed-step",
-  async ({ order }, { container }) => {
+  async ({ order }: StepInput, { container }) => {
     const analyticsModuleService = container.resolve(Modules.ANALYTICS)
 
     await analyticsModuleService.track({
       event: "order_placed",
-      userId: order.customer_id,
+      actor_id: order.customer_id,
       properties: {
         order_id: order.id,
         order_number: order.display_id,
@@ -243,7 +251,7 @@ const trackOrderPlacedStep = createStep(
 
 export const trackOrderPlacedWorkflow = createWorkflow(
   "track-order-placed-workflow",
-  ({ order_id }) => {
+  ({ order_id }: WorkflowInput) => {
     const { data: orders } = useQueryGraphStep({
       entity: "order",
       fields: ["*", "customer.*", "items.*"],
@@ -251,6 +259,8 @@ export const trackOrderPlacedWorkflow = createWorkflow(
     })
 
     trackOrderPlacedStep({ order: orders[0] })
+
+    return new WorkflowResponse(void 0)
   }
 )
 ```
@@ -324,33 +334,48 @@ Create a subscriber to send order confirmation emails:
 // src/subscribers/order-placed.ts
 import { Modules } from "@medusajs/framework/utils"
 import { SubscriberArgs, type SubscriberConfig } from "@medusajs/medusa"
+import { trackOrderPlacedWorkflow } from "../workflows/track-order-placed"
 
 export default async function orderPlacedHandler({
   event: { data },
   container,
 }: SubscriberArgs<{ id: string }>) {
-  const notificationModuleService = container.resolve(Modules.NOTIFICATION)
-  const query = container.resolve("query")
+  // Notifications
+  try {
+    const notificationModuleService = container.resolve(Modules.NOTIFICATION)
+    const query = container.resolve("query")
 
-  // Get order details
-  const { data: [order] } = await query.graph({
-    entity: "order",
-    fields: ["*", "customer.*", "items.*"],
-    filters: { id: data.id }
-  })
+    // Get order details
+    const { data: [order] } = await query.graph({
+      entity: "order",
+      fields: ["*", "customer.*", "items.*"],
+      filters: { id: data.id }
+    })
 
-  // Send email notification
-  await notificationModuleService.createNotifications({
-    to: order.customer.email,
-    channel: "email",
-    template: "order-confirmation",
-    data: {
-      customer_name: `${order.customer.first_name} ${order.customer.last_name}`,
-      order_number: order.display_id,
-      order_total: order.total,
-      items: order.items
-    }
-  })
+    // Send email notification
+    await notificationModuleService.createNotifications({
+      to: order.customer.email,
+      channel: "email",
+      template: "order-confirmation",
+      data: {
+        customer_name: `${order.customer.first_name} ${order.customer.last_name}`,
+        order_number: order.display_id,
+        order_total: order.total,
+        items: order.items
+      }
+    })
+  } catch (error) {
+    console.error("[Bloomreach] Error sending order notification:", error)
+  }
+
+  // Track analytics
+  try {
+    await trackOrderPlacedWorkflow(container).run({
+      input: { order_id: data.id }
+    })
+  } catch (error) {
+    console.error("[Bloomreach] Error tracking order analytics:", error)
+  }
 }
 
 export const config: SubscriberConfig = {
