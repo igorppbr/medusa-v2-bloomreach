@@ -15,8 +15,8 @@ jobs:
         with:
           node-version: '22.x'
           scope: '@igorppbr'
-      - run: npm install
-      - run: npm run build
+      - run: yarn install
+      - run: yarn run build
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.NODE_AUTH_TOKEN }}
